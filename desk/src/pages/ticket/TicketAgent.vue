@@ -39,7 +39,14 @@ import {
   TicketSymbol,
 } from "@/types";
 import { createResource, toast, usePageMeta } from "frappe-ui";
-import { computed, onBeforeUnmount, onMounted, provide, watch } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  provide,
+  watch,
+  ref, // ✅ FIX: added this import
+} from "vue";
 import { useRoute } from "vue-router";
 import { showCommentBox, showEmailBox } from "./modalStates";
 
@@ -52,11 +59,13 @@ const props = defineProps({
     required: true,
   },
 });
+
 const route = useRoute();
-const showPhoneModal = ref(false);
+const showPhoneModal = ref(false); // ✅ ref is now defined
 
 const ticketComposable = computed(() => useTicket(props.ticketId));
 const ticket = computed(() => ticketComposable.value.ticket);
+
 const customizations: Resource<Customizations> = createResource({
   url: "helpdesk.helpdesk.doctype.hd_ticket.api.get_ticket_customizations",
   cache: ["HD Ticket", "customizations"],
@@ -64,27 +73,15 @@ const customizations: Resource<Customizations> = createResource({
 });
 
 provide(TicketSymbol, ticket);
-
-provide(
-  AssigneeSymbol,
-  computed(() => ticketComposable.value.assignees)
-);
-provide(
-  TicketContactSymbol,
-  computed(() => ticketComposable.value.contact)
-);
-provide(
-  CustomizationSymbol,
-  computed(() => customizations)
-);
+provide(AssigneeSymbol, computed(() => ticketComposable.value.assignees));
+provide(TicketContactSymbol, computed(() => ticketComposable.value.contact));
+provide(CustomizationSymbol, computed(() => customizations));
 provide(
   RecentSimilarTicketsSymbol,
   computed(() => ticketComposable.value.recentSimilarTickets)
 );
-provide(
-  ActivitiesSymbol,
-  computed(() => ticketComposable.value.activities)
-);
+provide(ActivitiesSymbol, computed(() => ticketComposable.value.activities));
+
 provide("makeCall", () => {
   if (
     !ticketComposable.value.contact.data?.mobile_no &&
@@ -101,6 +98,7 @@ provide("makeCall", () => {
     docname: props.ticketId,
   });
 });
+
 const viewerComposable = computed(() => useActiveViewers(ticket.value.name));
 const viewers = computed(
   () => viewerComposable.value.currentViewers[props.ticketId] || []
@@ -112,7 +110,6 @@ watch(
   () => route.params.ticketId,
   (newTicketId, oldTicketId) => {
     if (newTicketId === oldTicketId) return;
-
     if (oldTicketId) stopViewing(oldTicketId as string);
     startViewing(newTicketId as string);
   },

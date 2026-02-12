@@ -4,52 +4,68 @@
       <template #left-header>
         <ViewBreadcrumbs
           label="Tickets"
-          :route-name="isCustomerPortal ? 'TicketsCustomer' : 'TicketsAgent'"
+          :route-name="listRouteName"
           :options="dropdownOptions"
           :dropdown-actions="viewActions"
           :current-view="currentView"
         />
       </template>
+
       <template #right-header>
-        <RouterLink
-          :to="{ name: isCustomerPortal ? 'TicketNew' : 'TicketAgentNew' }"
-        >
-          <Button label="Create" theme="gray" variant="solid">
+        <div class="flex items-center gap-2">
+          <!-- Create -->
+          <RouterLink :to="newTicketRoute">
+            <Button label="Create" theme="gray" variant="solid">
+              <template #prefix>
+                <LucidePlus class="h-4 w-4" />
+              </template>
+            </Button>
+          </RouterLink>
+
+          <!-- Email (opens ERPNext desk Communication list) -->
+          <Button
+            label="Email"
+            theme="gray"
+            variant="subtle"
+            @click="openErpEmail"
+          >
             <template #prefix>
-              <LucidePlus class="h-4 w-4" />
+              <FeatherIcon name="mail" class="h-4 w-4" />
             </template>
           </Button>
-        </RouterLink>
+
+          <!-- Bulk Email (redirects to /app/hd-ticket) -->
+          <Button
+            label="Bulk Action"
+            theme="gray"
+            variant="subtle"
+            @click="openBulkEmail"
+          >
+            <template #prefix>
+              <FeatherIcon name="send" class="h-4 w-4" />
+            </template>
+          </Button>
+        </div>
       </template>
     </LayoutHeader>
+
     <ListViewBuilder
       ref="listViewRef"
       :options="options"
-      @empty-state-action="
-        () =>
-          $router.push({
-            name: isCustomerPortal ? 'TicketNew' : 'TicketAgentNew',
-          })
-      "
-      @row-click="
-        (row) =>
-          $router.push({
-            name: isCustomerPortal ? 'TicketCustomer' : 'TicketAgent',
-            params: { ticketId: row },
-          })
-      "
+      @empty-state-action="handleEmptyStateAction"
+      @row-click="handleRowClick"
     />
+
     <ExportModal
       v-model="showExportModal"
-      :rowCount="$refs.listViewRef?.list?.data?.total_count ?? 0"
-      @update="
-        ({ export_type, export_all }) => exportRows(export_type, export_all)
-      "
+      :row-count="exportRowCount"
+      @update="handleExportUpdate"
     />
+
     <ViewModal
       v-if="viewDialog.show"
       v-model="viewDialog"
-      @update="(view, action) => handleView(view, action)"
+      @update="handleViewUpdate"
     />
   </div>
 </template>
@@ -71,7 +87,7 @@ import { dayjs } from "@/dayjs";
 import { useAuthStore } from "@/stores/auth";
 import { globalStore } from "@/stores/globalStore";
 import { useTicketStatusStore } from "@/stores/ticketStatus";
-import { View } from "@/types";
+import type { View } from "@/types";
 import { getIcon, isCustomerPortal } from "@/utils";
 import { Badge, FeatherIcon, toast, Tooltip, usePageMeta } from "frappe-ui";
 import { computed, h, onMounted, reactive, ref } from "vue";
@@ -93,12 +109,15 @@ const {
 const { $dialog, $socket } = globalStore();
 const { isManager } = useAuthStore();
 
-const listViewRef = ref(null);
+const listViewRef = ref<any | null>(null);
 const showExportModal = ref(false);
 
 const { getStatus } = useTicketStatusStore();
 
-const listSelections = ref(new Set());
+/* ---------- Selection & banner actions ---------- */
+
+const listSelections = ref<Set<string>>(new Set());
+
 const selectBannerActions = [
   {
     label: "Export",
@@ -108,13 +127,32 @@ const selectBannerActions = [
       showExportModal.value = true;
     },
   },
+  {
+    label: "Bulk Email",
+    icon: "mail",
+    onClick: (selections: Set<string>) => {
+      // store selections if you ever want to use them
+      listSelections.value = new Set(selections);
+      openBulkEmail();
+    },
+  },
 ];
+
+/* ---------- Column renderers & list options ---------- */
+
+const slaStatusColorMap: Record<string, string> = {
+  Fulfilled: "green",
+  Failed: "red",
+  "Resolution Due": "orange",
+  "First Response Due": "orange",
+  Paused: "blue",
+};
 
 const options = {
   doctype: "HD Ticket",
   columnConfig: {
     status: {
-      custom: ({ item }) => {
+      custom: ({ item }: { item: any }) => {
         const status = getStatus(item);
         const label = isCustomerPortal.value
           ? status?.["label_customer"]
@@ -130,7 +168,7 @@ const options = {
       },
     },
     agreement_status: {
-      custom: ({ item }) => {
+      custom: ({ item }: { item: string }) => {
         return h(Badge, {
           label: item,
           theme: slaStatusColorMap[item],
@@ -139,10 +177,12 @@ const options = {
       },
     },
     response_by: {
-      custom: ({ row, item }) => handle_response_by_field(row, item),
+      custom: ({ row, item }: { row: any; item: string }) =>
+        handle_response_by_field(row, item),
     },
     resolution_by: {
-      custom: ({ row, item }) => handle_resolution_by_field(row, item),
+      custom: ({ row, item }: { row: any; item: string }) =>
+        handle_resolution_by_field(row, item),
     },
   },
   isCustomerPortal: isCustomerPortal.value,
@@ -224,6 +264,8 @@ function handle_resolution_by_field(row: any, item: string) {
   }
 }
 
+/* ---------- Export logic ---------- */
+
 async function exportRows(
   export_type: "CSV" | "Excel" = "Excel",
   export_all: boolean = false
@@ -231,10 +273,10 @@ async function exportRows(
   const list = listViewRef.value?.list;
   if (!list) return;
 
-  const fields = JSON.stringify(list.data.columns.map((f) => f.key));
+  const fields = JSON.stringify(list.data.columns.map((f: any) => f.key));
   const order_by = list.params.order_by;
 
-  let filters = { ...list.params.filters };
+  let filters: any = { ...list.params.filters };
   let pageLength: number;
 
   if (export_all) {
@@ -246,26 +288,41 @@ async function exportRows(
     filters = JSON.stringify(filters);
   }
 
-  window.location.href = `/api/method/frappe.desk.reportview.export_query?file_format_type=${export_type}&title=HD Ticket&doctype=HD Ticket&fields=${fields}&filters=${filters}&order_by=${order_by}&page_length=${pageLength}&start=0&view=Report&with_comment_count=1`;
+  const url =
+    "/api/method/frappe.desk.reportview.export_query" +
+    `?file_format_type=${export_type}` +
+    "&title=HD Ticket" +
+    "&doctype=HD Ticket" +
+    `&fields=${fields}` +
+    `&filters=${filters}` +
+    `&order_by=${order_by}` +
+    `&page_length=${pageLength}` +
+    "&start=0&view=Report&with_comment_count=1";
+
+  window.location.href = url;
   reset();
   showExportModal.value = false;
 }
 
 function reset(reload = false) {
-  listViewRef.value?.unselectAll();
-  listSelections.value?.clear();
-  if (reload) listViewRef.value.reload();
+  if (listViewRef.value && listViewRef.value.unselectAll) {
+    listViewRef.value.unselectAll();
+  }
+  if (listSelections.value && listSelections.value.clear) {
+    listSelections.value.clear();
+  }
+  if (reload && listViewRef.value && listViewRef.value.reload) {
+    listViewRef.value.reload();
+  }
 }
 
-const slaStatusColorMap = {
-  Fulfilled: "green",
-  Failed: "red",
-  "Resolution Due": "orange",
-  "First Response Due": "orange",
-  Paused: "blue",
-};
+/* ---------- Views / dropdowns ---------- */
 
-let viewDialog = reactive({
+let viewDialog = reactive<{
+  show: boolean;
+  view: { label: string; icon: string; name: string };
+  mode: "create" | "edit" | "duplicate";
+}>({
   show: false,
   view: {
     label: "",
@@ -276,7 +333,7 @@ let viewDialog = reactive({
 });
 
 const dropdownOptions = computed(() => {
-  const items = [
+  const items: any[] = [
     {
       group: "Default Views",
       items: [
@@ -285,27 +342,26 @@ const dropdownOptions = computed(() => {
           icon: "align-justify",
           onClick: () =>
             router.push({
-              name: isCustomerPortal.value ? "TicketsCustomer" : "TicketsAgent",
+              name: listRouteName.value,
             }),
         },
       ],
     },
   ];
 
-  // Saved Views
-  if (getCurrentUserViews.value?.length !== 0) {
+  if (getCurrentUserViews.value && getCurrentUserViews.value.length) {
     items.push({
       group: "Saved Views",
       items: parseViews(getCurrentUserViews.value),
     });
   }
-  if (pinnedViews.value?.length !== 0) {
+  if (pinnedViews.value && pinnedViews.value.length) {
     items.push({
       group: "Private Views",
       items: parseViews(pinnedViews.value),
     });
   }
-  if (publicViews.value?.length !== 0) {
+  if (publicViews.value && publicViews.value.length) {
     items.push({
       group: "Public Views",
       items: parseViews(publicViews.value),
@@ -332,10 +388,10 @@ const dropdownOptions = computed(() => {
 
 let selectedView: View | null = null;
 
-const viewActions = (view) => {
-  const _view = findView(view.name).value;
+const viewActions = (view: View) => {
+  const _view = findView(view.name).value as View;
 
-  let actions = [
+  const actions: any[] = [
     {
       group: "Default Views",
       hideLabel: true,
@@ -355,6 +411,7 @@ const viewActions = (view) => {
       ],
     },
   ];
+
   if (!_view.public || isManager) {
     actions[0].items.push({
       label: "Edit",
@@ -367,19 +424,21 @@ const viewActions = (view) => {
         viewDialog.show = true;
       },
     });
+
     if (!_view.public) {
       actions[0].items.push({
         label: _view?.pinned ? "Unpin View" : "Pin View",
         icon: h(_view?.pinned ? UnpinIcon : PinIcon, { class: "h-4 w-4" }),
         onClick: () => {
-          const newView = {
+          const newView: any = {
             name: _view.name,
+            pinned: !_view.pinned,
           };
-          newView["pinned"] = !_view.pinned;
           updateView(newView);
         },
       });
     }
+
     if (isManager && !isCustomerPortal.value) {
       actions[0].items.push({
         label: _view?.public ? "Make Private" : "Make Public",
@@ -388,7 +447,7 @@ const viewActions = (view) => {
           class: "h-4 w-4",
         }),
         onClick: () => {
-          const newView = {
+          const newView: any = {
             name: _view.name,
             public: !_view.public,
           };
@@ -402,7 +461,7 @@ const viewActions = (view) => {
                 {
                   label: "Confirm",
                   variant: "solid",
-                  onClick({ close }) {
+                  onClick({ close }: { close: () => void }) {
                     close();
                     updateView(newView);
                   },
@@ -415,6 +474,7 @@ const viewActions = (view) => {
         },
       });
     }
+
     actions.push({
       group: "Delete View",
       hideLabel: true,
@@ -425,22 +485,19 @@ const viewActions = (view) => {
           onClick: () => {
             $dialog({
               title: `Delete ${_view.label}?`,
-              message: `Are you sure you want to delete this view?
-              ${
-                _view.public
-                  ? "This view is public, and will be removed for all users."
-                  : ""
-              }`,
+              message:
+                "Are you sure you want to delete this view?" +
+                (_view.public
+                  ? " This view is public, and will be removed for all users."
+                  : ""),
               actions: [
                 {
                   label: "Confirm",
                   variant: "solid",
-                  onClick({ close }) {
+                  onClick({ close }: { close: () => void }) {
                     if (route.query.view === _view.name) {
                       router.push({
-                        name: isCustomerPortal.value
-                          ? "TicketsCustomer"
-                          : "TicketsAgent",
+                        name: listRouteName.value,
                       });
                     }
                     deleteView(_view.name);
@@ -460,27 +517,26 @@ const viewActions = (view) => {
 };
 
 function parseViews(views: View[]) {
-  return views?.map((view) => {
-    return {
-      ...view,
-      onClick: () => {
-        currentView.value = {
-          label: view.label,
-          icon: view.icon,
-        };
-        router.push({
-          name: view.route_name,
-          query: {
-            view: view.name,
-          },
-        });
-      },
-    };
-  });
+  return views.map((view) => ({
+    ...view,
+    onClick: () => {
+      currentView.value = {
+        label: view.label,
+        icon: view.icon,
+      };
+      router.push({
+        name: view.route_name,
+        query: {
+          view: view.name,
+        },
+      });
+    },
+  }));
 }
 
-function handleView(viewInfo, action) {
+function handleView(viewInfo: any, action: "update" | "duplicate" | "create") {
   let view: View;
+
   if (action === "update") {
     updateView(viewInfo);
     handleSuccess("updated");
@@ -489,7 +545,7 @@ function handleView(viewInfo, action) {
       icon: getIcon(viewInfo.icon),
     };
     return;
-  } else if (action === "duplicate") {
+  } else if (action === "duplicate" && selectedView) {
     view = {
       ...selectedView,
       filters: JSON.stringify(selectedView.filters),
@@ -504,25 +560,24 @@ function handleView(viewInfo, action) {
     view = {
       dt: "HD Ticket",
       type: "list",
-      label: viewInfo.label ?? "List",
-      icon: viewInfo.icon ?? "",
+      label: viewInfo.label || "List",
+      icon: viewInfo.icon || "",
       route_name: router.currentRoute.value.name as string,
       order_by: listViewRef.value?.list?.params.order_by,
       filters: JSON.stringify(listViewRef.value?.list?.params.filters),
       columns: JSON.stringify(listViewRef.value?.list?.data.columns),
       rows: JSON.stringify(listViewRef.value?.list?.data?.rows),
       is_customer_portal: isCustomerPortal.value,
-    };
+    } as View;
   }
 
-  // createView
-  createView(view, (d) => {
+  createView(view, (d: View) => {
     currentView.value = {
       label: d.label || "List",
       icon: getIcon(d.icon),
     };
     router.push({
-      name: isCustomerPortal.value ? "TicketsCustomer" : "TicketsAgent",
+      name: listRouteName.value,
       query: {
         view: d.name,
       },
@@ -536,14 +591,75 @@ function handleSuccess(msg = "created") {
   toast.success(`View ${msg}`);
   resetState();
 }
+
 function resetState() {
   viewDialog.show = false;
   viewDialog.view.label = "";
   viewDialog.view.icon = "";
   viewDialog.view.name = "";
-  viewDialog.mode = null;
+  viewDialog.mode = "create";
   selectedView = null;
 }
+
+/* ---------- Email / Bulk Email ---------- */
+
+function openErpEmail() {
+  // Opens ERPNext Desk Communication list
+  window.location.href = "/app/communication";
+}
+
+function openBulkEmail() {
+  // Always go to HD Ticket page
+  // On your server this is: http://192.168.5.21/app/hd-ticket
+  window.location.href = "/app/hd-ticket";
+}
+
+/* ---------- Template helpers ---------- */
+
+const listRouteName = computed(() =>
+  isCustomerPortal.value ? "TicketsCustomer" : "TicketsAgent"
+);
+
+const newTicketRoute = computed(() => ({
+  name: isCustomerPortal.value ? "TicketNew" : "TicketAgentNew",
+}));
+
+const exportRowCount = computed(() => {
+  const list = listViewRef.value?.list;
+  if (!list || !list.data) return 0;
+  return typeof list.data.total_count === "number"
+    ? list.data.total_count
+    : 0;
+});
+
+function handleEmptyStateAction() {
+  router.push({
+    name: isCustomerPortal.value ? "TicketNew" : "TicketAgentNew",
+  });
+}
+
+function handleRowClick(row: string) {
+  router.push({
+    name: isCustomerPortal.value ? "TicketCustomer" : "TicketAgent",
+    params: { ticketId: row },
+  });
+}
+
+function handleExportUpdate(payload: {
+  export_type: "CSV" | "Excel";
+  export_all: boolean;
+}) {
+  exportRows(payload.export_type, payload.export_all);
+}
+
+function handleViewUpdate(
+  view: any,
+  action: "update" | "duplicate" | "create"
+) {
+  handleView(view, action);
+}
+
+/* ---------- Lifecycle & meta ---------- */
 
 onMounted(() => {
   if (!route.query.view) {
@@ -553,12 +669,13 @@ onMounted(() => {
     };
   }
   $socket.on("helpdesk:new-ticket", () => {
-    listViewRef.value?.reload();
+    if (listViewRef.value && listViewRef.value.reload) {
+      listViewRef.value.reload();
+    }
   });
 });
-usePageMeta(() => {
-  return {
-    title: "Tickets",
-  };
-});
+
+usePageMeta(() => ({
+  title: "Tickets",
+}));
 </script>

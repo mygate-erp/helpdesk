@@ -187,7 +187,15 @@ def build_index():
     search.build_index()
 
 
-def delete_doc():
-    """Delete document from index - called by background job."""
-    search = HelpdeskSearch()
-    search.remove_doc()
+# ~/frappe-bench/apps/helpdesk/helpdesk/search_sqlite.py
+
+def delete_doc(doc, method=None):
+    """Remove this document from the Helpdesk search index when it is trashed."""
+    try:
+        from .search_sqlite import HelpdeskSearch  # keep import local to avoid circulars
+        HelpdeskSearch().remove_doc(doc.doctype, doc.name)
+    except Exception as e:
+        import frappe
+        frappe.logger("helpdesk").warning(
+            f"remove_doc failed for {getattr(doc, 'doctype', '?')} {getattr(doc, 'name', '?')}: {e}"
+        )

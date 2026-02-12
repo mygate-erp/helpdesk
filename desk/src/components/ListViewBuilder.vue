@@ -212,7 +212,7 @@ const defaultOptions = reactive({
     name: route.query.view,
   },
   groupByActions: [],
-  default_page_length: 20,
+  default_page_length: 200,
   isCustomerPortal: false,
   hideColumnSetting: true,
   rowRoute: {
@@ -700,3 +700,4 @@ onMounted(async () => {
 
 defineExpose(exposeFunctions);
 </script>
+

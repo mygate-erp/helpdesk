@@ -88,22 +88,17 @@ interface Filter {
   raised_by?: [string, string[] | string];
 }
 
+
 function getDefaultFilters() {
   const filters: Filter = {
     status_category: ["in", ["Open", "Paused"]],
     is_merged: 0,
     name: ["!=", props.ticket.name],
   };
-  // if part of an organization show all tickets of the organization
-  if (props.ticket.customer) {
-    filters.customer = props.ticket.customer;
-  }
-  //  show all tickets of the person who raised the ticket
-  if (props.ticket.raised_by) {
-    filters.raised_by = ["like", `%${props.ticket.raised_by}%`];
-  }
+
   return filters;
 }
+
 
 const targetTicket = ref(null);
 const subject = ref(null);
