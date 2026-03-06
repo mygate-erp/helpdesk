@@ -1,0 +1,14 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[remote "upstream"]
+	url = https://github.com/frappe/helpdesk.git
+	fetch = +refs/heads/l10n_develop2:refs/remotes/upstream/l10n_develop2
+[branch "l10n_develop2"]
+	remote = upstream
+	merge = refs/heads/l10n_develop2
+[remote "origin"]
+	url = https://richitapatnaik@bitbucket.org/vivishtech/custom-helpdesk.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
