@@ -1,6 +1,5 @@
 import { ref } from "vue";
 import { createResource } from "frappe-ui";
-import "../../../frappe/frappe/public/js/lib/posthog.js";
 
 const APP = "helpdesk";
 const SITENAME = window.location.hostname;
@@ -12,6 +11,7 @@ declare global {
     posthog: any;
   }
 }
+
 type PosthogSettings = {
   posthog_project_id: string;
   posthog_host: string;
@@ -25,7 +25,18 @@ const telemetry = ref({
   host: "",
 });
 
-let posthog: typeof window.posthog = window.posthog;
+const noopPosthog = {
+  init: () => {},
+  capture: () => {},
+  __loaded: false,
+  identify: () => {},
+  startSessionRecording: () => {},
+  stopSessionRecording: () => {},
+  sessionRecordingStarted: () => false,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let posthog: any = window.posthog || noopPosthog;
 
 let posthogSettings = createResource({
   url: "helpdesk.api.telemetry.get_posthog_settings",
@@ -70,7 +81,7 @@ export function capture(
   options: CaptureOptions = { data: { user: "" } }
 ) {
   if (!isTelemetryEnabled()) return;
-  window.posthog.capture(`${APP}_${event}`, options);
+  window.posthog?.capture?.(`${APP}_${event}`, options);
 }
 
 export function recordSession() {
@@ -92,6 +103,6 @@ export function stopSession() {
 }
 
 export function posthogPlugin(app: any) {
-  app.config.globalProperties.posthog = window.posthog;
+  app.config.globalProperties.posthog = window.posthog || noopPosthog;
   if (!window.posthog?.length) posthogSettings.fetch();
 }
